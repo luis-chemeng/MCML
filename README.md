@@ -1,2 +1,2 @@
 # MCML
- Machine Learning for Magnetocaloric Perovskites
+ Machine learning for magnetocaloric perovskites.
