@@ -4,4 +4,4 @@
 
 ## Graphical README
 
-![Alt text](URL_to_your_image.jpg)
+![screenshot](Graphical_readme.png)
