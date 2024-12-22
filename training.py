@@ -46,7 +46,7 @@ import joblib
 
 prop = 'TC'
 
-wd = 'TC12'  # Working directory
+wd = 'TC4'  # Working directory
 
 dsa = pd.read_csv(f'dsa_{prop}.csv')
 dsb = pd.read_csv(f'dsb_{prop}.csv')

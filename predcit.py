@@ -83,7 +83,7 @@ dataset = 'A'
 best_models = {
     'TC' : [['KRR', 'Var'],['KRR', 'RFE10']],
     'ME' : [['XGB', 'RFE10'],['KRR', 'RFE10']],
-    'RCP' : [['XGB', 'MinDelta'],['XGB', 'DC10']],
+    'RCP' : [['XGB', 'MinDelta'],['XGB', 'Geo']],
     }
 
 if dataset=='A':
