@@ -35,7 +35,8 @@ from sklearn.model_selection import GridSearchCV
 from sklearn.metrics import r2_score, mean_absolute_error, mean_squared_error
 from sklearn.model_selection import train_test_split
 from sklearn.model_selection import cross_val_score
-from hyperopt import fmin, tpe, hp, Trials
+from hyperopt import fmin, tpe, hp, Trials, STATUS_OK
+from sklearn.model_selection import KFold
 
 # More
 import json
@@ -43,9 +44,9 @@ import joblib
 
 # %% Open data
 
-prop = 'RCP'
+prop = 'TC'
 
-wd = 'RCP4'  # Working directory
+wd = 'TC12'  # Working directory
 
 dsa = pd.read_csv(f'dsa_{prop}.csv')
 dsb = pd.read_csv(f'dsb_{prop}.csv')
@@ -90,9 +91,9 @@ for n_feat in n_feats:
 # %% Training
 
 istest = False
-train_with_hp = True # To do bayesian optimization with ANN instead of grid search
+train_with_hp = True # To do bayesian optimization
 
-
+kf = KFold(n_splits=5, shuffle=True, random_state=42)
 
 # Artificial Neural Network
 ANN = MLPRegressor(max_iter=100000, tol=0.0001, learning_rate_init=0.05,
@@ -100,7 +101,7 @@ ANN = MLPRegressor(max_iter=100000, tol=0.0001, learning_rate_init=0.05,
 
 ANN_hl = [(4,), (8,), (12,), (4, 4), (12, 4), (12, 12), (4, 4, 4)]
 ANN_act = ['relu', 'logistic']
-ANN_al = [0.001, 0.01, 0.1, 1, 10]
+ANN_al = [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10]
 
 ANN_param_grid = {
     'hidden_layer_sizes': ANN_hl,
@@ -109,14 +110,13 @@ ANN_param_grid = {
 }
 
 
-space = {
+space_ANN = {
     'hidden_layer_sizes': hp.choice('hidden_layer_sizes', ANN_hl),
     'alpha': hp.choice('alpha', ANN_al),
     'activation': hp.choice('activation', ANN_act),
 }
 
-# Define the objective function for hyperparameter optimization (hyperopt)
-def objective(params):
+def objective_ANN(params):
     model = MLPRegressor(hidden_layer_sizes=params['hidden_layer_sizes'],
                          alpha=params['alpha'],
                          activation=params['activation'],
@@ -139,30 +139,62 @@ def objective(params):
 XGB = XGBRegressor(random_state=1)
 
 XGB_param_grid = {
-    'n_estimators': [25, 100, 400],
     'max_depth': [2, 5, 10, None],
-    'learning_rate': [0.01, 0.1, 0.2],
+    'learning_rate': [0.01, 0.05, 0.1, 0.2],
     'subsample': [0.6, 0.7, 0.8, 0.9],
     'colsample_bytree': [0.7, 0.8, 0.9],
+    'reg_alpha' : [0.01, 0.05, 0.1, 0.5, 1.0, 2.0, 4.0,],
+    }
+
+space_XGB = {
+    'reg_alpha': hp.choice('reg_alpha', XGB_param_grid['reg_alpha']),
+    'max_depth': hp.choice('max_depth', XGB_param_grid['max_depth']),
+    'learning_rate': hp.choice('learning_rate', XGB_param_grid['learning_rate']),
+    'subsample': hp.choice('subsample', XGB_param_grid['subsample']),
+    'colsample_bytree': hp.choice('colsample_bytree', XGB_param_grid['colsample_bytree']),
 }
+
 
 
 # Random forest regressor
 RF = RandomForestRegressor(random_state=1)
 
 RF_param_grid = {
-    'n_estimators': [25, 100, 400],
+    'n_estimators': np.arange(20, 400, 10).tolist(),
     'max_depth': [2, 5, 10, None],
     'min_samples_split': [2, 5, 10],
-    'min_samples_leaf': [1, 3, 5]
+    'min_samples_leaf': [1, 3, 5],
+    'ccp_alpha' : [0.01, 0.1, 0.5, 1.0]
 }
 
+space_RF = {
+    'n_estimators': hp.choice('n_estimators', RF_param_grid['n_estimators']),
+    'max_depth': hp.choice('max_depth', RF_param_grid['max_depth']),
+    'min_samples_split': hp.choice('min_samples_split', RF_param_grid['min_samples_split']),
+    'min_samples_leaf': hp.choice('min_samples_leaf', RF_param_grid['min_samples_leaf']),
+    'ccp_alpha': hp.choice('ccp_alpha', RF_param_grid['ccp_alpha']),
+}
+
+def objective_RF(params):
+    model = RandomForestRegressor(n_estimators=params['n_estimators'],
+                         max_depth=params['max_depth'],
+                         min_samples_split=params['min_samples_split'],
+                         random_state=1,
+                         min_samples_leaf=params['min_samples_leaf'],
+                         ccp_alpha=params['ccp_alpha']
+                         )
+
+    # Use cross-validation to evaluate the performance
+    score = -np.mean(cross_val_score(model, X_train, Y_train,
+                     cv=5, scoring='neg_mean_squared_error'))
+
+    return score
 
 # Kernel ridge regression
 KRR = KernelRidge()
 
 KRR_param_grid = {
-    'alpha': [0.001, 0.01, 0.1, 1, 10],  # Regularization strength
+    'alpha': [0.001, 0.003, 0.01, 0.03, 0.1, 0.3, 1, 3, 10],  # Regularization strength
     'kernel': ['rbf', 'poly'],  # Kernel type
     'gamma': [0.001, 0.01, 0.1, 1, 10]  # Kernel coefficient for 'rbf' and 'poly'
 }
@@ -187,11 +219,12 @@ else:
     print(f'The file {file_path} does not exist.')
 
 mlms = [KRR, ANN, XGB, RF]
-mlm_names = ['RR', 'ANN', 'XGB', 'RF']
+mlm_names = ['KRR', 'ANN', 'XGB', 'RF']
 param_grids = [KRR_param_grid, ANN_param_grid, XGB_param_grid, RF_param_grid]
 
+
 # for k in range(1,2):
-for k in [0]:
+for k in [0, 1, 2, 3]:
 
     mlm = mlms[k]
     mlm_name = mlm_names[k]
@@ -206,7 +239,6 @@ for k in [0]:
 
             if dtype == 'A':
                 df = dfa
-                lucky_seed = u.find_lucky_seed(dsa)
                 lucky_seed = 42
                 if prop == 'TC':
                     X_sub = df[pred]
@@ -214,7 +246,6 @@ for k in [0]:
                     X_sub = df[pred+['H']]
             else:
                 df = dfb
-                lucky_seed = u.find_lucky_seed(dsb)
                 lucky_seed = 42
                 if prop == 'TC':
                     X_sub = df[pred+['D']]
@@ -240,8 +271,8 @@ for k in [0]:
 
                 if mlm_name == 'ANN' and train_with_hp:
                     trials = Trials()
-                    best = fmin(fn=objective, space=space,
-                                max_evals=45, algo=tpe.suggest)
+                    best = fmin(fn=objective_ANN, space=space_ANN,
+                                max_evals=100, algo=tpe.suggest)
 
                     best_model = MLPRegressor(hidden_layer_sizes=ANN_hl[best['hidden_layer_sizes']],
                                               alpha=ANN_al[best['alpha']],
@@ -256,6 +287,74 @@ for k in [0]:
 
                     best_model.fit(X_train, Y_train)
 
+                elif mlm_name == 'XGB' and train_with_hp:
+                    trials = Trials()
+                    
+                    def objective_XGB(params):
+                        stopping_rounds = []
+                        mse_scores = []
+                        for train_index, val_index in kf.split(X_train):
+                            x_train, x_val = X_train[train_index], X_train[val_index]
+                            y_train, y_val = Y_train[train_index], Y_train[val_index]
+                        
+                            model = XGBRegressor(n_estimators=500,
+                                                 reg_alpha=params['reg_alpha'],
+                                                 max_depth=params['max_depth'],
+                                                 learning_rate=params['learning_rate'],
+                                                 random_state=1,
+                                                 colsample_bytree=params['colsample_bytree'],
+                                                 subsample=params['subsample'],
+                                                 )
+                            
+                            # Train the model with early stopping
+                            model.fit(
+                                x_train, y_train,
+                                eval_set=[(x_val, y_val)],
+                                early_stopping_rounds=20,
+                                verbose=False
+                            )
+                            
+                            # Predict on validation set and calculate MSE
+                            y_pred = model.predict(x_val)
+                            stopping_rounds.append(model.best_ntree_limit)
+                            mse_scores.append(mean_squared_error(y_val, y_pred))
+
+                        return {'loss': np.mean(mse_scores), 'status': STATUS_OK, 'stopping_rounds': stopping_rounds}
+                    
+                    best = fmin(fn=objective_XGB, space=space_XGB,
+                                max_evals=100, algo=tpe.suggest, trials=trials)
+                    
+                    best_trial = min(trials.trials, key=lambda x: x['result']['loss'])
+                    
+                    best_iteration = int(np.mean(best_trial['result']['stopping_rounds']))
+                    
+                    best_model = XGBRegressor(n_estimators=best_iteration,
+                                         reg_alpha=XGB_param_grid['reg_alpha'][best['reg_alpha']],
+                                         max_depth=XGB_param_grid['max_depth'][best['max_depth']],
+                                         learning_rate=XGB_param_grid['learning_rate'][best['learning_rate']],
+                                         random_state=1,
+                                         colsample_bytree=XGB_param_grid['colsample_bytree'][best['colsample_bytree']],
+                                         subsample=XGB_param_grid['subsample'][best['subsample']],
+                                         )                    
+                    
+                    best_model.fit(X_train, Y_train)
+                    
+                elif mlm_name == 'RF' and train_with_hp:
+                    trials = Trials()
+                    
+                    best = fmin(fn=objective_RF, space=space_RF,
+                                max_evals=100, algo=tpe.suggest, trials=trials)
+                    
+                    
+                    best_model = RandomForestRegressor(n_estimators=RF_param_grid['n_estimators'][best['n_estimators']],
+                                         max_depth=RF_param_grid['max_depth'][best['max_depth']],
+                                         min_samples_split=RF_param_grid['min_samples_split'][best['min_samples_split']],
+                                         random_state=1,
+                                         min_samples_leaf=RF_param_grid['min_samples_leaf'][best['min_samples_leaf']],
+                                         ccp_alpha=RF_param_grid['ccp_alpha'][best['ccp_alpha']]
+                                         )                   
+                    
+                    best_model.fit(X_train, Y_train)
                 else:
 
                     grid_search = GridSearchCV(
