@@ -161,7 +161,7 @@ Y_new_pred = model1.predict(X_new_scaled)
 
 df_new[prop] = Y_new_pred 
 
-df_new.to_csv(f'preditc_{wd}_{model}_{dataset}_{feats}.csv')  
+df_new.to_csv(f'predict_{wd}_{model}_{dataset}_{feats}.csv')  
 
 
   
